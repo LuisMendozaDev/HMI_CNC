@@ -43,25 +43,25 @@ class Ui_MainWindow(object):
         self.frame_5.setFrameShadow(QFrame.Raised)
         self.verticalLayout_3 = QVBoxLayout(self.frame_5)
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
-        self.cb_portlist = QComboBox(self.frame_5)
-        self.cb_portlist.setObjectName(u"cb_portlist")
+        self.cb_list_ports = QComboBox(self.frame_5)
+        self.cb_list_ports.setObjectName(u"cb_list_ports")
 
-        self.verticalLayout_3.addWidget(self.cb_portlist)
+        self.verticalLayout_3.addWidget(self.cb_list_ports)
 
-        self.pushButton = QPushButton(self.frame_5)
-        self.pushButton.setObjectName(u"pushButton")
+        self.bt_conectar = QPushButton(self.frame_5)
+        self.bt_conectar.setObjectName(u"bt_conectar")
 
-        self.verticalLayout_3.addWidget(self.pushButton)
+        self.verticalLayout_3.addWidget(self.bt_conectar)
 
-        self.pushButton_11 = QPushButton(self.frame_5)
-        self.pushButton_11.setObjectName(u"pushButton_11")
+        self.bt_actualizar = QPushButton(self.frame_5)
+        self.bt_actualizar.setObjectName(u"bt_actualizar")
 
-        self.verticalLayout_3.addWidget(self.pushButton_11)
+        self.verticalLayout_3.addWidget(self.bt_actualizar)
 
-        self.pushButton_12 = QPushButton(self.frame_5)
-        self.pushButton_12.setObjectName(u"pushButton_12")
+        self.bt_desconectar = QPushButton(self.frame_5)
+        self.bt_desconectar.setObjectName(u"bt_desconectar")
 
-        self.verticalLayout_3.addWidget(self.pushButton_12)
+        self.verticalLayout_3.addWidget(self.bt_desconectar)
 
         self.verticalSpacer_2 = QSpacerItem(20, 10, QSizePolicy.Minimum, QSizePolicy.Fixed)
 
@@ -368,9 +368,9 @@ class Ui_MainWindow(object):
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
         self.actionSubir_GCODE.setText(QCoreApplication.translate("MainWindow", u"Subir GCODE", None))
-        self.pushButton.setText(QCoreApplication.translate("MainWindow", u"CONECTAR", None))
-        self.pushButton_11.setText(QCoreApplication.translate("MainWindow", u"ACTUALIZAR", None))
-        self.pushButton_12.setText(QCoreApplication.translate("MainWindow", u"DESCONECTAR", None))
+        self.bt_conectar.setText(QCoreApplication.translate("MainWindow", u"CONECTAR", None))
+        self.bt_actualizar.setText(QCoreApplication.translate("MainWindow", u"ACTUALIZAR", None))
+        self.bt_desconectar.setText(QCoreApplication.translate("MainWindow", u"DESCONECTAR", None))
         self.etiqueta_estado.setText(QCoreApplication.translate("MainWindow", u"ESTADO", None))
         self.pushButton_21.setText("")
         self.pushButton_19.setText("")

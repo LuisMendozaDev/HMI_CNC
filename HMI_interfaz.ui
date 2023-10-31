@@ -39,24 +39,24 @@
         </property>
         <layout class="QVBoxLayout" name="verticalLayout_3">
          <item>
-          <widget class="QComboBox" name="cb_portlist"/>
+          <widget class="QComboBox" name="cb_list_ports"/>
          </item>
          <item>
-          <widget class="QPushButton" name="pushButton">
+          <widget class="QPushButton" name="bt_conectar">
            <property name="text">
             <string>CONECTAR</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QPushButton" name="pushButton_11">
+          <widget class="QPushButton" name="bt_actualizar">
            <property name="text">
             <string>ACTUALIZAR</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QPushButton" name="pushButton_12">
+          <widget class="QPushButton" name="bt_desconectar">
            <property name="text">
             <string>DESCONECTAR</string>
            </property>
