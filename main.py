@@ -16,89 +16,66 @@ from PyQt5.QtCore import QEvent, QThread
 from threading import Event
 import serial
 import serial.tools.list_ports
-# Taller # 1
-# Autores: Luis Fernando Mendoza Cardona - José De Jesús Caro Urueta - Angel De Jesus Tuñon Cuello
+from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QIODevice
+from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
 
+class SerialHandler(QObject):
+    error_occurred = pyqtSignal(int)
+    connected = pyqtSignal(bool)
+    data_received = pyqtSignal(str)
 
-class stream_gcode_Thread(QThread):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.serial = QSerialPort()
+        self.is_connected = False
+        self.serial.errorOccurred.connect(self.handle_error)
 
-    def stream_gcode(self, gcode_path):
-        # with contect opens file/connection and closes it if function(with) scope is left
-        with open(gcode_path, "r") as file, window.serial as ser:
-            self.send_wake_up(ser)
-            self.total_lines = 5
-            self.processed_lines = 0
-            for line in file:
-                # cleaning up gcode from file
-                cleaned_line = self.remove_eol_chars(
-                    self.remove_comment(line))
-                if cleaned_line:  # checks if string is empty
-                    print("Sending gcode:" + str(cleaned_line))
-                    # converts string to byte encoded string and append newline
-                    command = str.encode(line + '\n')
-                    ser.write(command)  # Send g-code
+    def get_serial_port(self):
+        return self.serial
 
-                    self.wait_for_movement_completion(ser, cleaned_line)
+    def handle_error(self, error):
+        self.error_occurred.emit(error)
+        print(f"Error en el puerto serial: {error}, {self.serial.errorString()}")
+        if error == QSerialPort.ResourceError:
+            self.connected.emit(False)
 
-                    # processed_lines += 1
-                    # percentage = (processed_lines / total_lines) * 100
-                    # self.progreso(int(percentage))
-
-                    grbl_out = ser.readline()  # Wait for response with carriage return
-                    print(" : ", grbl_out.strip().decode('utf-8'))
-
-            print('End of gcode')
-            window.textEdit.setReadOnly(False)
-    
-    def remove_comment(self, string):
-        if (string.find(';') == -1):
-            return string
+    @pyqtSlot()
+    def connect_serial(self, port_name, baud_rate):
+        self.serial.setPortName(port_name)
+        self.serial.setBaudRate(baud_rate)
+        is_connected = self.serial.open(QIODevice.ReadWrite)
+        if is_connected:
+            self.connected.emit(True)
+            self.send_data("\r\n\r\n")
         else:
-            return string[:string.index(';')]
+            self.connected.emit(False)
 
-    def remove_eol_chars(self, string):
-        # removed \n or traling spaces
-        return string.strip()
+    @pyqtSlot()
+    def clear_serial_input(self):
+        self.serial.clear(QSerialPort.Input)
 
-    def send_wake_up(self, ser):
-        # Wake up
-        # Hit enter a few times to wake the Printrbot
-        ser.write(str.encode("\r\n\r\n"))
-        time.sleep(2)   # Wait for Printrbot to initialize
-        ser.flushInput()  # Flush startup text in serial input
+    @pyqtSlot()
+    def disconnect_serial(self):
+        if self.is_connected:
+            self.serial.close()
+            self.connected.emit(False)
 
-    def wait_for_movement_completion(self, ser, cleaned_line):
-        Event().wait(1)
+    @pyqtSlot(str)
+    def send_data(self, data):
+        data = data + "\n"
+        if self.serial.isOpen():
+            self.serial.write(data.encode())
 
-        if cleaned_line != '$X' or '$$':
-            idle_counter = 0
+    @pyqtSlot()
+    def read_data(self):
+        if not self.serial.canReadLine():
+            return
+        rx = self.serial.readLine()
+        self.data_received.emit(str(rx, 'utf-8').strip())
+        print(str(rx, 'utf-8').strip())
 
-            while True:
-                ser.reset_input_buffer()
-                command = str.encode('?' + '\n')
-                ser.write(command)
-                
-                start_time = time.time()
-                timeout = 1.0  # Set the timeout to 1 second (adjust as needed)
-
-                while time.time() - start_time < timeout:
-                    grbl_out = ser.readline()
-                    if grbl_out:
-                        break  # Exit the inner loop if data is received
-
-                print(grbl_out)
-                grbl_response = grbl_out.strip().decode('utf-8')
-
-                if grbl_response != 'ok':
-                    if grbl_response.find('Idle') > 0:
-                        idle_counter += 1
-
-                if idle_counter > 10:
-                    break
-        return
-
+# Autores: Luis Fernando Mendoza Cardona - José De Jesús Caro Urueta - Angel De Jesus Tuñon Cuello
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -113,6 +90,16 @@ class MainApp(QMainWindow):
         global prev_x
         global prev_y
         global prev_Z
+
+        self.serial_handler = SerialHandler()
+        self.serial_thread = QThread(self)
+        self.serial_handler.moveToThread(self.serial_thread)
+        self.serial_thread.start()
+
+        # Conecta la señal error_occurred a una función específica
+        self.serial_handler.error_occurred.connect(self.handle_serial_error)
+
+        self.is_connect = False
         self.archivo = []
         self.gcode = ""
         milisegundos = 200
@@ -124,10 +111,13 @@ class MainApp(QMainWindow):
         self.boton_parar_presionado = False
         self.pausar_proceso = False
 
-        self.portList = []
+        self.port_line = ""
 
-        # Se iniciala la variable que nos permitirá acceder al puerto serial
-        self.serial = None
+        self.portList = []
+        # self.serial = QSerialPort()
+        # self.serial.errorOccurred.connect(self.handle_error)
+        self.line_port = ""
+
         self.setWindowTitle("Gráfica 3D con PyQt5 y Matplotlib")
 
         # Se vinculan los botones de actualizar, conectar y desconectar con las respectivas funciones
@@ -142,6 +132,9 @@ class MainApp(QMainWindow):
         self.bt_x_retrocede.clicked.connect(self.retrocede_x)
         self.bt_z_avanza.clicked.connect(self.avanza_z)
         self.bt_z_retrocede.clicked.connect(self.retrocede_z)
+        #handler para manejar hilo
+        self.serial_handler.connected.connect(self.update_connection_status)
+        # self.serial_handler.disconnected.connect(self.update_connection_status)
         # Boton set home
         self.setHome.clicked.connect(self.set_home)
 
@@ -233,91 +226,99 @@ class MainApp(QMainWindow):
 
         self.progreso(0)
 
-    # def remove_comment(self, string):
-    #     if (string.find(';') == -1):
-    #         return string
-    #     else:
-    #         return string[:string.index(';')]
+    @pyqtSlot(int)
+    def handle_serial_error(self, error_code):
+        if error_code == QSerialPort.ResourceError:
+            # Acciones específicas para manejar ResourceError
+            self.serial_handler.connected.connect(self.update_connection_status)
+            self.show_message_dialog("Error de recurso en el puerto serial. Desconectando...")
+        elif error_code == QSerialPort.NoError:
+            self.show_message_dialog("Conectado Correctamente")
+        else:
+            # Acciones genéricas para otros tipos de errores
+            self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(error_code, self.serial_handler.get_serial_port().errorString()))
+    
+    def read_ports(self):
+        self.portList = [p.portName() for p in QSerialPortInfo.availablePorts()]
+        self.cb_list_ports.clear()
+        self.cb_list_ports.addItems(self.portList)
+    
+    def send_data(self, data):
+        self.serial_handler.send_data(data)
 
-    # def remove_eol_chars(self, string):
-    #     # removed \n or traling spaces
-    #     return string.strip()
+    def serial_connect(self):
+        port_name = self.cb_list_ports.currentText()
+        baud_rate = 115200
+        # Envia la señal para que el hilo maneje la conexión
+        self.serial_handler.connect_serial(port_name, baud_rate)
+        self.serial_handler.connected.connect(self.update_connection_status)
 
-    # def send_wake_up(self, ser):
-    #     # Wake up
-    #     # Hit enter a few times to wake the Printrbot
-    #     ser.write(str.encode("\r\n\r\n"))
-    #     time.sleep(2)   # Wait for Printrbot to initialize
-    #     ser.flushInput()  # Flush startup text in serial input
+    
+    def update_connection_status(self, isConnect):
+        self.is_connect = isConnect
+        if self.is_connect:
+            self.etiqueta_estado.setStyleSheet("color:#00FF00;")
+            self.etiqueta_estado.setText("CONECTADO")
+        else:
+            self.etiqueta_estado.setStyleSheet("color:#FF0000;")
+            self.etiqueta_estado.setText("DESCONECTADO")
+        
 
-    # def wait_for_movement_completion(self, ser, cleaned_line):
+    def serial_disconnect(self):
+        # Funcion para desconectar el puerto serial
 
-    #     Event().wait(1)
-
-    #     if cleaned_line != '$X' or '$$':
-
-    #         idle_counter = 0
-
-    #         while True:
-
-    #             # Event().wait(0.01)
-    #             ser.reset_input_buffer()
-    #             command = str.encode('?' + '\n')
-    #             ser.write(command)
-    #             grbl_out = ser.readline()
-    #             print(grbl_out)
-    #             grbl_response = grbl_out.strip().decode('utf-8')
-
-    #             if grbl_response != 'ok':
-
-    #                 if grbl_response.find('Idle') > 0:
-    #                     idle_counter += 1
-
-    #             if idle_counter > 10:
-    #                 break
-    #     return
+        # Envia la señal para que el hilo maneje la desconexión
+        self.serial_handler.disconnect_serial()
+        self.serial_handler.connected.connect(self.update_connection_status)
+    
+    def stream_gcode(self, gcode_path):
+        #reads the gcode file
+        gcodeFile = open(gcode_path,'r')
+        gcode = gcodeFile.readlines()
+        #executes each line of the gcode
+        for line in gcode:
+            response = ''
+            #removes comments
+            line = self.remove_comment(self.remove_eol_chars(line))
+            #makes sure line is a valid command
+            if(line != "" and line != "\n"):
+                #writes the gcode to the printer
+                self.send_data(line)
+                coordenadas, velocidad = self.obtener_coordenadas_y_velocidad(line)
+                print(coordenadas)
+                print("velocidad: ", velocidad)
+                self.serial_handler.read_data()
+                self.serial_handler.data_received.connect(self.data_received_from_port)
+                response = self.port_line
+                #waits for OK response from printer
+                while response.count("ok") == 0:
+                    #waits for response
+                    self.serial_handler.read_data()
+                    self.serial_handler.data_received.connect(self.data_received_from_port)
+                    while self.serial_handler.get_serial_port().waitForReadyRead(200):
+                        response += self.port_line
+                    print(response)
+                    # self.serial.clear(QSerialPort.Input)
 
     def calculate_percentage(total_lines, processed_lines):
         if total_lines == 0:
             return 100  # To avoid division by zero
         return (processed_lines / total_lines) * 100
 
-    # def stream_gcode(self, gcode_path):
-    #     # with contect opens file/connection and closes it if function(with) scope is left
-    #     with open(gcode_path, "r") as file, self.serial as ser:
-    #         self.send_wake_up(ser)
-    #         total_lines = 5
-    #         processed_lines = 0
-    #         for line in file:
-    #             # cleaning up gcode from file
-    #             cleaned_line = self.remove_eol_chars(self.remove_comment(line))
-    #             if cleaned_line:  # checks if string is empty
-    #                 print("Sending gcode:" + str(cleaned_line))
-    #                 # converts string to byte encoded string and append newline
-    #                 command = str.encode(line + '\n')
-    #                 ser.write(command)  # Send g-code
-
-    #                 self.wait_for_movement_completion(ser,cleaned_line)
-
-    #                 # processed_lines += 1
-    #                 # percentage = (processed_lines / total_lines) * 100
-    #                 # self.progreso(int(percentage))
-
-    #                 grbl_out = ser.readline()  # Wait for response with carriage return
-    #                 print(" : " , grbl_out.strip().decode('utf-8'))
-
-    #         print('End of gcode')
-    #         self.textEdit.setReadOnly(False)
-
     def limpiar(self):
         self.textEdit.setText("")
+        self.textEdit.setReadOnly(False)
+
 
     def eventFilter(self, obj, event):
         if obj == self.blink and event.type() == QEvent.MouseButtonPress:
             # Cambia el icono cuando se presiona el botón
-            self.blink.setIcon(QIcon('img\on.png'))
-            gcode = "M3 S100\n G1 F1000\n M5 S0"
-            self.button_sender(gcode)
+            if self.is_connect:
+                self.blink.setIcon(QIcon('img\on.png'))
+                gcode = "M3 S100\n G1 F1000\n M5 S0"
+                self.button_sender(gcode)
+            else:
+                self.show_message_dialog("El Puerto Serial No Está Conectado")
 
         elif obj == self.blink and event.type() == QEvent.MouseButtonRelease:
             # Restaura el icono original cuando se suelta el botón
@@ -351,64 +352,27 @@ class MainApp(QMainWindow):
             self.textEdit.setText(self.datos)
         self.textEdit.setReadOnly(True)
 
-    def read_ports(self):
-        # Limpiar la lista actual de puertos
-        self.cb_list_ports.clear()
-
-        # Obtener la lista de puertos disponibles
-        ports = [port.device for port in serial.tools.list_ports.comports()]
-
-        # Agregar puertos a la lista
-        self.cb_list_ports.addItems(ports)
-
-    def serial_connect(self):
-        # Funcion para conectar el puerto serial
-        self.etiqueta_estado.setStyleSheet("color:#00FF00;")
-        self.etiqueta_estado.setText("CONECTADO")
-        port_name = self.cb_list_ports.currentText()
-
-        try:
-            # Intentar abrir el puerto serial
-            self.serial = serial.Serial(port=port_name, baudrate=115200)
-            print(f"Puerto serial {port_name} conectado.")
-        except serial.SerialException as e:
-            print(f"Error al conectar el puerto serial {port_name}: {e}")
-
-    def serial_disconnect(self):
-        # Funcion para desconectar el puerto serial
-        self.etiqueta_estado.setStyleSheet("color:#FF0000;")
-        self.etiqueta_estado.setText("DESCONECTADO")
-        print("Puerto serial desconectado")
-        if self.serial and self.serial.is_open:
-            self.serial.close()
-            print("Puerto serial desconectado.")
-
-    def button_sender(self, datos):
-        if self.serial and self.serial.is_open:
-            try:
-                # Convertir la cadena a bytes antes de enviarla
-                datos_codificados = datos.encode()
-
-                # Enviar datos
-                self.serial.write(datos_codificados)
-                print(f"Datos enviados: {datos}")
-            except Exception as e:
-                QMessageBox.warning(
-                    self, "Error", f"Error al enviar datos: {e}")
+    def remove_comment(self, string:str):
+        if (string.find(';') == -1):
+            return string
         else:
+            return string[:string.index(';')]
+
+    def remove_eol_chars(self, string:str):
+        # removed \n or traling spaces
+        return string.strip()
+
+    def button_sender(self, datos:str):
+        try:
+            # Convertir la cadena a bytes antes de enviarla
+            datos_codificados = datos.encode()
+
+            # Enviar datos
+            self.serial.write(datos_codificados)
+            print(f"Datos enviados: {datos}")
+        except Exception as e:
             QMessageBox.warning(
-                self, "Error", "El puerto serial no está conectado.")
-
-    def button_sender(self, dato):
-        with open(comandos_g, "w") as archivo:
-            archivo.write(dato)
-
-        stream_thread = self.stream_gcode_Thread()
-        stream_thread.stream_gcode("codigo_g.txt")
-
-        # Abrir el archivo en modo escritura, esto borrará el contenido existente
-        with open(comandos_g, 'w') as archivo:
-            pass  # No necesitas escribir nada, solo abrir el archivo en modo escritura lo limpiará
+                self, "Error", f"Error al enviar datos: {e}")
 
     def grafica_punto(self):
         # Actualizar el objeto GLLinePlotItem con los nuevos puntos
@@ -422,69 +386,92 @@ class MainApp(QMainWindow):
             print(f"Error: {e}")
 
     def set_home(self):
-        self.button_sender("G10 L20 P1 X0 Y0 Z0")
-        self.home()
+        if self.is_connect: 
+            self.button_sender("G10 L20 P1 X0 Y0 Z0")
+            self.home()
+        else: 
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def avanza_y(self):
-
-        prev_y = self.Y
-        self.Y += self.resolucion
-        self.button_sender(f"G1 Y{self.Y} F{velocidad}")
-        cone_mesh.translate(0, self.Y - prev_y, 0)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_y = self.Y
+            self.Y += self.resolucion
+            self.button_sender(f"G1 Y{self.Y} F{velocidad}")
+            cone_mesh.translate(0, self.Y - prev_y, 0)
+            self.grafica_punto()
+        else: 
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def retrocede_y(self):
-        prev_y = self.Y
-        self.Y -= self.resolucion
-        self.button_sender(f"G1 Y{self.Y} F{velocidad}")
-        cone_mesh.translate(0, self.Y - prev_y, 0)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_y = self.Y
+            self.Y -= self.resolucion
+            self.button_sender(f"G1 Y{self.Y} F{velocidad}")
+            cone_mesh.translate(0, self.Y - prev_y, 0)
+            self.grafica_punto()
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def avanza_x(self):
-        prev_x = self.X
-        self.X += self.resolucion
-        self.button_sender(f"G1 X{self.X} F{velocidad}")
-        cone_mesh.translate(self.X - prev_x, 0, 0)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_x = self.X
+            self.X += self.resolucion
+            self.button_sender(f"G1 X{self.X} F{velocidad}")
+            cone_mesh.translate(self.X - prev_x, 0, 0)
+            self.grafica_punto()
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def retrocede_x(self):
-        prev_x = self.X
-        self.X -= self.resolucion
-        self.button_sender(f"G1 X{self.X} F{velocidad}")
-        cone_mesh.translate(self.X - prev_x, 0, 0)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_x = self.X
+            self.X -= self.resolucion
+            self.button_sender(f"G1 X{self.X} F{velocidad}")
+            cone_mesh.translate(self.X - prev_x, 0, 0)
+            self.grafica_punto()
+        else: 
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def avanza_z(self):
-        prev_z = self.Z
-        self.Z -= self.resolucion
-        self.button_sender(f"G1 Z{self.Z} F{velocidad}")
-        cone_mesh.translate(0, 0, self.Z - prev_z)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_z = self.Z
+            self.Z -= self.resolucion
+            self.button_sender(f"G1 Z{self.Z} F{velocidad}")
+            cone_mesh.translate(0, 0, self.Z - prev_z)
+            self.grafica_punto()
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def retrocede_z(self):
-        prev_z = self.Z
-        self.Z += self.resolucion
-        self.button_sender(f"G1 Z{self.Z} F{velocidad}")
-        cone_mesh.translate(0, 0, self.Z - prev_z)
-        self.grafica_punto()
+        if self.is_connect:
+            prev_z = self.Z
+            self.Z += self.resolucion
+            self.button_sender(f"G1 Z{self.Z} F{velocidad}")
+            cone_mesh.translate(0, 0, self.Z - prev_z)
+            self.grafica_punto()
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def home(self):
-        prev_x = self.X
-        prev_y = self.Y
-        prev_z = self.Z
-        self.X = self.Y = self.Z = 0.0
-        self.button_sender(f"G1 X0 Y0 Z0 F{velocidad}")
-        cone_mesh.translate(self.X - prev_x, self.Y - prev_y, self.Z - prev_z)
+        if self.is_connect:
+            prev_x = self.X
+            prev_y = self.Y
+            prev_z = self.Z
+            self.X = self.Y = self.Z = 0.0
+            self.button_sender(f"G1 X0 Y0 Z0 F{velocidad}")
+            cone_mesh.translate(self.X - prev_x, self.Y - prev_y, self.Z - prev_z)
 
-        # Reiniciar la lista de puntos del camino
-        self.path_points = []
-        try:
-            # Actualizar el objeto GLLinePlotItem con la lista vacía para borrar el camino
-            self.path_item.setData(pos=np.array(
-                self.path_points), color=(1, 0, 0, 1), width=2)
-            self.grafica_punto()
-        except Exception as e:
-            print(f"Error: {e}")
+            # Reiniciar la lista de puntos del camino
+            self.path_points = []
+            try:
+                # Actualizar el objeto GLLinePlotItem con la lista vacía para borrar el camino
+                self.path_item.setData(pos=np.array(
+                    self.path_points), color=(1, 0, 0, 1), width=2)
+                self.grafica_punto()
+            except Exception as e:
+                print(f"Error: {e}")
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def calcular_progreso_gcode(self, archivo_gcode):
         # Inicializa las variables para el seguimiento de coordenadas y progreso.
@@ -543,27 +530,60 @@ class MainApp(QMainWindow):
         self.progressBar.setValue(porcentaje)
 
     def comenzar(self):
-        self.boton_parar_presionado = False
-        dato = self.textEdit.toPlainText()
+        if self.is_connect: 
+            self.boton_parar_presionado = False
+            dato = self.textEdit.toPlainText()
 
-        with open(comandos_g, "w") as archivo:
-            archivo.write(dato)
+            with open(comandos_g, "w") as archivo:
+                archivo.write(dato)
 
-        self.stream_thread = stream_gcode_Thread()
-        self.stream_thread.stream_gcode("codigo_g.txt")
+            self.stream_gcode("codigo_g.txt")
+        else: 
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
+    
+    @pyqtSlot(str)
+    def data_received_from_port(self, data):
+        self.port_line = data
 
-        # self.stream_gcode("codigo_g.txt")
+    def obtener_coordenadas_y_velocidad(self,linea):
+        coordenadas = {'X': 0, 'Y': 0, 'Z': 0}
+        velocidad = None
 
+        # Eliminar comentarios
+        linea = linea.split(";")[0].strip()
+
+        # Asegurarse de que la línea sea un comando G-code válido
+        if linea:
+            partes = linea.split()
+
+            for parte in partes:
+                if parte[0] == 'G':
+                    # Comando G, verificar si es movimiento lineal (G0 o G1)
+                    if parte == 'G0' or parte == 'G1':
+                        for componente in partes[1:]:
+                            if componente[0] in coordenadas:
+                                coordenada, valor = componente[0], float(componente[1:])
+                                coordenadas[coordenada] = valor
+                    elif parte[0] == 'F':
+                        # Velocidad (Feed Rate)
+                        velocidad = float(parte[1:])
+
+        return coordenadas, velocidad
+
+    
     def parar(self):
-        self.boton_parar_presionado = True
-        if (self.boton_parar_presionado and not (self.detener_proceso)):
-            self.detener_proceso = True
-            self.button_sender("M2")
+        if self.is_connect:
+            self.boton_parar_presionado = True
+            if (self.boton_parar_presionado and not (self.detener_proceso)):
+                self.detener_proceso = True
+                self.button_sender("M2")
+        else:
+            self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def show_message_dialog(self, mensaje):
         "Funcion para mostrar mensaje en una panel de dialogo"
         message_box = QMessageBox()
-        message_box.setWindowTitle("Mensaje de PyQt5")
+        message_box.setWindowTitle("GRBL Sender")
         message_box.setText(mensaje)
         message_box.setIcon(QMessageBox.Information)
         message_box.setStandardButtons(QMessageBox.Ok)
@@ -573,9 +593,7 @@ class MainApp(QMainWindow):
         prev_x = self.X
         prev_y = self.Y
         prev_z = self.Z
-        # lines = [line for line in self.datos]
-        # print(lines)
-        # cone_mesh.translate(self.X - prev_x, 0, 0)
+
 
 
 if __name__ == "__main__":
