@@ -16,9 +16,32 @@ from PyQt5.QtCore import QEvent, QThread
 from threading import Event
 import serial
 import serial.tools.list_ports
-from PyQt5.QtCore import QTimer
-from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QIODevice
+from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QIODevice, QCoreApplication
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
+
+import speech_recognition as sr
+from pydub.playback import play
+from pydub import AudioSegment
+from gtts import gTTS
+import keyboard
+import os
+
+class PlayAudio(QObject):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def play_audio(self, string):
+        # Funcion para pasar texto a audio
+        tts = gTTS(text=string, lang='es')
+        # Guarda el audio como un archivo temporal
+        tts.save("tmp/temp.mp3")
+        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+        if os.path.exists(file_path):
+            audio = AudioSegment.from_file(file_path)
+            play(audio)
+        else:
+            print(f"El archivo {file_path} no existe.")
 
 class SerialHandler(QObject):
     error_occurred = pyqtSignal(int)
@@ -26,9 +49,10 @@ class SerialHandler(QObject):
     data_received = pyqtSignal(str)
 
     def __init__(self, parent=None):
+        
         super().__init__(parent)
         self.serial = QSerialPort()
-        self.is_connected = False
+        self.is_connected=False
         self.serial.errorOccurred.connect(self.handle_error)
 
     def get_serial_port(self):
@@ -44,8 +68,8 @@ class SerialHandler(QObject):
     def connect_serial(self, port_name, baud_rate):
         self.serial.setPortName(port_name)
         self.serial.setBaudRate(baud_rate)
-        is_connected = self.serial.open(QIODevice.ReadWrite)
-        if is_connected:
+        self.is_connected = self.serial.open(QIODevice.ReadWrite)
+        if self.is_connected:
             self.connected.emit(True)
             self.send_data("\r\n\r\n")
         else:
@@ -92,9 +116,14 @@ class MainApp(QMainWindow):
         global prev_Z
 
         self.serial_handler = SerialHandler()
-        self.serial_thread = QThread(self)
+        self.serial_thread = QThread()
         self.serial_handler.moveToThread(self.serial_thread)
         self.serial_thread.start()
+
+        # self.audio_player = PlayAudio()
+        # self.serial_thread_2 = QThread(self)
+        # self..moveToThread(self.serial_thread_2)
+        # self.serial_thread.start()
 
         # Conecta la señal error_occurred a una función específica
         self.serial_handler.error_occurred.connect(self.handle_serial_error)
@@ -168,7 +197,7 @@ class MainApp(QMainWindow):
         self.Y = 0
         self.Z = 0
 
-        velocidad = 150
+        velocidad = 100
         # Crear ejes X, Y, Z personalizados
         axis_width = 5  # Puedes ajustar este valor según tu preferencia
 
@@ -231,13 +260,26 @@ class MainApp(QMainWindow):
         if error_code == QSerialPort.ResourceError:
             # Acciones específicas para manejar ResourceError
             self.serial_handler.connected.connect(self.update_connection_status)
+            self.play_audio(string="el equipo se desconectó de manera imprevista")
             self.show_message_dialog("Error de recurso en el puerto serial. Desconectando...")
         elif error_code == QSerialPort.NoError:
             self.show_message_dialog("Conectado Correctamente")
         else:
             # Acciones genéricas para otros tipos de errores
             self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(error_code, self.serial_handler.get_serial_port().errorString()))
-    
+
+    def play_audio(self, string):
+        # Funcion para pasar texto a audio
+        tts = gTTS(text=string, lang='es')
+        # Guarda el audio como un archivo temporal
+        tts.save("tmp/temp.mp3")
+        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+        if os.path.exists(file_path):
+            audio = AudioSegment.from_file(file_path)
+            play(audio)
+        else:
+            print(f"El archivo {file_path} no existe.")
+
     def read_ports(self):
         self.portList = [p.portName() for p in QSerialPortInfo.availablePorts()]
         self.cb_list_ports.clear()
@@ -263,42 +305,112 @@ class MainApp(QMainWindow):
             self.etiqueta_estado.setStyleSheet("color:#FF0000;")
             self.etiqueta_estado.setText("DESCONECTADO")
         
-
     def serial_disconnect(self):
         # Funcion para desconectar el puerto serial
 
         # Envia la señal para que el hilo maneje la desconexión
         self.serial_handler.disconnect_serial()
         self.serial_handler.connected.connect(self.update_connection_status)
-    
+
     def stream_gcode(self, gcode_path):
-        #reads the gcode file
-        gcodeFile = open(gcode_path,'r')
-        gcode = gcodeFile.readlines()
-        #executes each line of the gcode
+        # Reads the G-code file
+        with open(gcode_path, 'r') as gcodeFile:
+            gcode = gcodeFile.readlines()
+
+        # Executes each line of the G-code
         for line in gcode:
-            response = ''
-            #removes comments
+            print("hola 1")
+            print(line)
+            # Removes comments and end-of-line characters
             line = self.remove_comment(self.remove_eol_chars(line))
-            #makes sure line is a valid command
-            if(line != "" and line != "\n"):
-                #writes the gcode to the printer
+
+            # Makes sure the line is a valid command
+            if line and line != "\n":
+                # Writes the G-code to the printer
                 self.send_data(line)
                 coordenadas, velocidad = self.obtener_coordenadas_y_velocidad(line)
                 print(coordenadas)
                 print("velocidad: ", velocidad)
-                self.serial_handler.read_data()
-                self.serial_handler.data_received.connect(self.data_received_from_port)
-                response = self.port_line
-                #waits for OK response from printer
-                while response.count("ok") == 0:
-                    #waits for response
-                    self.serial_handler.read_data()
-                    self.serial_handler.data_received.connect(self.data_received_from_port)
-                    while self.serial_handler.get_serial_port().waitForReadyRead(200):
-                        response += self.port_line
-                    print(response)
-                    # self.serial.clear(QSerialPort.Input)
+
+                # Waits for the "OK" response from the printer
+                response = self.wait_for_ok_response()
+                print("adios")
+
+                # Do something with the response if needed
+                print(response)
+    
+    def start_serial_reading(self):
+        # Conectar la señal readyRead para manejar la llegada de nuevos datos
+        self.serial_handler.get_serial_port().readyRead.connect(self.read_data_non_blocking)
+
+    def read_data_non_blocking(self):
+        # Manejar los datos disponibles de manera no bloqueante
+        while self.serial_handler.get_serial_port().bytesAvailable() > 0:
+            self.serial_handler.data_received.connect(self.data_received_from_port)
+            response = self.port_line
+            self.data_received_from_port(response)
+
+
+    def wait_for_ok_response(self):
+        response = ''
+
+        while response.count("ok") == 0:
+            # No uses waitForReadyRead aquí, ya que es bloqueante
+            self.serial_handler.read_data()  # Asegúrate de que esta función lea de manera no bloqueante
+            self.serial_handler.data_received.connect(self.data_received_from_port)
+
+            # Si deseas esperar un poco antes de verificar nuevamente, puedes usar un temporizador
+            # QCoreApplication.processEvents() permite que la interfaz siga respondiendo
+            QCoreApplication.processEvents()
+            QThread.msleep(50)  # Puedes ajustar el tiempo de espera según tus necesidades
+
+            response += self.port_line
+            if "ok" in response:
+                break
+
+        return response
+
+    # def wait_for_ok_response(self):
+    #     response = ''
+        
+    #     while response.count("ok") == 0:
+    #         # Waits for response
+    #         self.serial_handler.read_data()
+    #         while self.serial_handler.get_serial_port().waitForReadyRead(500):
+    #             response += self.port_line
+    #             if "ok" in response:
+    #                 break
+
+    #     return response
+    
+    # def stream_gcode(self, gcode_path):
+    #     #reads the gcode file
+    #     gcodeFile = open(gcode_path,'r')
+    #     gcode = gcodeFile.readlines()
+    #     #executes each line of the gcode
+    #     for line in gcode:
+    #         response = ''
+    #         #removes comments
+    #         line = self.remove_comment(self.remove_eol_chars(line))
+    #         #makes sure line is a valid command
+    #         if(line != "" and line != "\n"):
+    #             #writes the gcode to the printer
+    #             self.send_data(line)
+    #             coordenadas, velocidad = self.obtener_coordenadas_y_velocidad(line)
+    #             print(coordenadas)
+    #             print("velocidad: ", velocidad)
+    #             self.serial_handler.read_data()
+    #             self.serial_handler.data_received.connect(self.data_received_from_port)
+    #             response = self.port_line
+    #             #waits for OK response from printer
+    #             while response.count("ok") == 0:
+    #                 #waits for response
+    #                 self.serial_handler.read_data()
+    #                 self.serial_handler.data_received.connect(self.data_received_from_port)
+    #                 while self.serial_handler.get_serial_port().waitForReadyRead(200):
+    #                     response += self.port_line
+    #                 print(response)
+    #                 # self.serial.clear(QSerialPort.Input)
 
     def calculate_percentage(total_lines, processed_lines):
         if total_lines == 0:
@@ -316,7 +428,7 @@ class MainApp(QMainWindow):
             if self.is_connect:
                 self.blink.setIcon(QIcon('img\on.png'))
                 gcode = "M3 S100\n G1 F1000\n M5 S0"
-                self.button_sender(gcode)
+                self.send_data(gcode)
             else:
                 self.show_message_dialog("El Puerto Serial No Está Conectado")
 
@@ -362,18 +474,6 @@ class MainApp(QMainWindow):
         # removed \n or traling spaces
         return string.strip()
 
-    def button_sender(self, datos:str):
-        try:
-            # Convertir la cadena a bytes antes de enviarla
-            datos_codificados = datos.encode()
-
-            # Enviar datos
-            self.serial.write(datos_codificados)
-            print(f"Datos enviados: {datos}")
-        except Exception as e:
-            QMessageBox.warning(
-                self, "Error", f"Error al enviar datos: {e}")
-
     def grafica_punto(self):
         # Actualizar el objeto GLLinePlotItem con los nuevos puntos
         try:
@@ -387,7 +487,7 @@ class MainApp(QMainWindow):
 
     def set_home(self):
         if self.is_connect: 
-            self.button_sender("G10 L20 P1 X0 Y0 Z0")
+            self.send_data("G92 X0 Y0 Z0")
             self.home()
         else: 
             self.show_message_dialog("El Puerto Serial No Está Conectado")
@@ -396,7 +496,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_y = self.Y
             self.Y += self.resolucion
-            self.button_sender(f"G1 Y{self.Y} F{velocidad}")
+            self.send_data(f"G1 Y{self.Y} F{velocidad}")
             cone_mesh.translate(0, self.Y - prev_y, 0)
             self.grafica_punto()
         else: 
@@ -406,7 +506,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_y = self.Y
             self.Y -= self.resolucion
-            self.button_sender(f"G1 Y{self.Y} F{velocidad}")
+            self.send_data(f"G1 Y{self.Y} F{velocidad}")
             cone_mesh.translate(0, self.Y - prev_y, 0)
             self.grafica_punto()
         else:
@@ -416,7 +516,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_x = self.X
             self.X += self.resolucion
-            self.button_sender(f"G1 X{self.X} F{velocidad}")
+            self.send_data(f"G1 X{self.X} F{velocidad}")
             cone_mesh.translate(self.X - prev_x, 0, 0)
             self.grafica_punto()
         else:
@@ -426,7 +526,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_x = self.X
             self.X -= self.resolucion
-            self.button_sender(f"G1 X{self.X} F{velocidad}")
+            self.send_data(f"G1 X{self.X} F{velocidad}")
             cone_mesh.translate(self.X - prev_x, 0, 0)
             self.grafica_punto()
         else: 
@@ -436,7 +536,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_z = self.Z
             self.Z -= self.resolucion
-            self.button_sender(f"G1 Z{self.Z} F{velocidad}")
+            self.send_data(f"G1 Z{self.Z} F{velocidad}")
             cone_mesh.translate(0, 0, self.Z - prev_z)
             self.grafica_punto()
         else:
@@ -446,7 +546,7 @@ class MainApp(QMainWindow):
         if self.is_connect:
             prev_z = self.Z
             self.Z += self.resolucion
-            self.button_sender(f"G1 Z{self.Z} F{velocidad}")
+            self.send_data(f"G1 Z{self.Z} F{velocidad}")
             cone_mesh.translate(0, 0, self.Z - prev_z)
             self.grafica_punto()
         else:
@@ -458,7 +558,7 @@ class MainApp(QMainWindow):
             prev_y = self.Y
             prev_z = self.Z
             self.X = self.Y = self.Z = 0.0
-            self.button_sender(f"G1 X0 Y0 Z0 F{velocidad}")
+            self.send_data(f"G1 X0 Y0 Z0 F{velocidad}")
             cone_mesh.translate(self.X - prev_x, self.Y - prev_y, self.Z - prev_z)
 
             # Reiniciar la lista de puntos del camino
@@ -576,7 +676,7 @@ class MainApp(QMainWindow):
             self.boton_parar_presionado = True
             if (self.boton_parar_presionado and not (self.detener_proceso)):
                 self.detener_proceso = True
-                self.button_sender("M2")
+                self.send_data("M2")
         else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
