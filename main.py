@@ -357,7 +357,42 @@ class MainApp(QMainWindow):
         self.X, self.Y, self.Z = coordenadas['X'], coordenadas['Y'], coordenadas['Z']
 
         return coordenadas, velocidad, potencia
+    
+    # def grafica_punto(self, potencia = 0):
+    #     # Actualizar el objeto GLLinePlotItem con los nuevos puntos
+    #     try:
+    #         self.path_points.append([-10 + self.X, -14 + self.Y, 0 + self.Z])
+    #         if len(self.path_points) >= 2:
+    #             path_array = np.array(self.path_points)
+    #             self.path_item.setData(
+    #             pos=path_array, color=(1, 0, 0, 1), width=2)
+    #     except Exception as e:
+    #         print(f"Error: {e}")
 
+    def grafica_punto(self, potencia=0):
+        try:
+            # Crear una nueva lista para los puntos actuales
+            current_path = [[-10 + self.X, -14 + self.Y, 0 + self.Z]]
+
+            # Agregar el nuevo punto a la lista actual
+            if self.path_points:
+                current_path = self.path_points[-1] + current_path
+
+            # Agregar la lista actual a la lista total de puntos
+            self.path_points.append(current_path)
+
+            if len(self.path_points) >= 2:
+                path_array = np.array(self.path_points[-2])  # Tomar solo los puntos del conjunto anterior
+
+                # Ajustar la opacidad solo para los puntos más recientes con potencias más altas
+                alpha_values = np.linspace(0, 1, len(path_array)) * (1 - potencia)
+
+                # Configurar la apariencia de la línea con opacidad variable
+                self.path_item.setData(pos=path_array, color=(1, 0, 0, alpha_values), width=2)
+
+        except Exception as e:
+            print(f"Error: {e}")
+    
     def stream_gcode(self, gcode_path):
         # Reads the G-code file
         with open(gcode_path, 'r') as gcodeFile:
@@ -483,42 +518,6 @@ class MainApp(QMainWindow):
     def remove_eol_chars(self, string: str):
         # removed \n or traling spaces
         return string.strip()
-
-    def grafica_punto(self, potencia = 0):
-        # Actualizar el objeto GLLinePlotItem con los nuevos puntos
-        try:
-            self.path_points.append([-10 + self.X, -14 + self.Y, 0 + self.Z])
-            if len(self.path_points) >= 2:
-                path_array = np.array(self.path_points)
-                self.path_item.setData(
-                pos=path_array, color=(1, 0, 0, 1), width=2)
-        except Exception as e:
-            print(f"Error: {e}")
-
-    # def grafica_punto(self, potencia):
-    #     try:
-    #         # Actualizar las coordenadas y potencia
-    #         self.potencia_actual = potencia
-
-    #         # Añadir el nuevo punto a la lista
-    #         self.path_points.append({'pos': [self.X, self.Y, self.Z], 'potencia': self.potencia_actual})
-
-    #         if len(self.path_points) >= 2:
-    #             # Convertir la lista de puntos a un array de numpy para la visualización
-    #             path_array = np.array([p['pos'] for p in self.path_points])
-
-    #             # Definir colores para contornos y áreas no grabadas
-    #             color_contorno = (1, 0, 0, 1)  # Rojo para contornos
-    #             color_no_grabado = (0, 0, 0, 0)  # Transparente para áreas no grabadas
-
-    #             # Crear una lista de colores según la potencia
-    #             colores = [color_contorno if p['potencia'] > 300 else color_no_grabado for p in self.path_points]
-
-    #             # Actualizar el objeto GLLinePlotItem con los nuevos puntos y colores
-    #             self.path_item.setData(pos=path_array, color=colores, width=2)
-
-    #     except Exception as e:
-    #         print(f"Error: {e}")
 
     def set_home(self):
         if self.is_connect:
@@ -680,31 +679,6 @@ class MainApp(QMainWindow):
     @pyqtSlot(str)
     def data_received_from_port(self, data):
         self.port_line = data
-
-    # def obtener_coordenadas_y_velocidad(self,linea):
-    #     coordenadas = {'X': 0, 'Y': 0, 'Z': 0}
-    #     velocidad = None
-
-    #     # Eliminar comentarios
-    #     linea = linea.split(";")[0].strip()
-
-    #     # Asegurarse de que la línea sea un comando G-code válido
-    #     if linea:
-    #         partes = linea.split()
-
-    #         for parte in partes:
-    #             if parte[0] == 'G':
-    #                 # Comando G, verificar si es movimiento lineal (G0 o G1)
-    #                 if parte == 'G0' or parte == 'G1':
-    #                     for componente in partes[1:]:
-    #                         if componente[0] in coordenadas:
-    #                             coordenada, valor = componente[0], float(componente[1:])
-    #                             coordenadas[coordenada] = valor
-    #                 elif parte[0] == 'F':
-    #                     # Velocidad (Feed Rate)
-    #                     velocidad = float(parte[1:])
-
-    #     return coordenadas, velocidad
 
     def parar(self):
         if self.is_connect:
