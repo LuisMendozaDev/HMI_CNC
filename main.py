@@ -26,6 +26,7 @@ from gtts import gTTS
 import keyboard
 import os
 
+
 class PlayAudio(QObject):
 
     def __init__(self, parent=None):
@@ -43,16 +44,17 @@ class PlayAudio(QObject):
         else:
             print(f"El archivo {file_path} no existe.")
 
+
 class SerialHandler(QObject):
     error_occurred = pyqtSignal(int)
     connected = pyqtSignal(bool)
     data_received = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        
+
         super().__init__(parent)
         self.serial = QSerialPort()
-        self.is_connected=False
+        self.is_connected = False
         self.serial.errorOccurred.connect(self.handle_error)
 
     def get_serial_port(self):
@@ -60,7 +62,8 @@ class SerialHandler(QObject):
 
     def handle_error(self, error):
         self.error_occurred.emit(error)
-        print(f"Error en el puerto serial: {error}, {self.serial.errorString()}")
+        print(
+            f"Error en el puerto serial: {error}, {self.serial.errorString()}")
         if error == QSerialPort.ResourceError:
             self.connected.emit(False)
 
@@ -100,6 +103,7 @@ class SerialHandler(QObject):
         print(str(rx, 'utf-8').strip())
 
 # Autores: Luis Fernando Mendoza Cardona - José De Jesús Caro Urueta - Angel De Jesus Tuñon Cuello
+
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -161,7 +165,7 @@ class MainApp(QMainWindow):
         self.bt_x_retrocede.clicked.connect(self.retrocede_x)
         self.bt_z_avanza.clicked.connect(self.avanza_z)
         self.bt_z_retrocede.clicked.connect(self.retrocede_z)
-        #handler para manejar hilo
+        # handler para manejar hilo
         self.serial_handler.connected.connect(self.update_connection_status)
         # self.serial_handler.disconnected.connect(self.update_connection_status)
         # Boton set home
@@ -196,6 +200,9 @@ class MainApp(QMainWindow):
         self.X = 0
         self.Y = 0
         self.Z = 0
+
+        self.velocidad_actual = 0
+        self.potencia_actual = 0
 
         velocidad = 100
         # Crear ejes X, Y, Z personalizados
@@ -259,14 +266,18 @@ class MainApp(QMainWindow):
     def handle_serial_error(self, error_code):
         if error_code == QSerialPort.ResourceError:
             # Acciones específicas para manejar ResourceError
-            self.serial_handler.connected.connect(self.update_connection_status)
-            self.play_audio(string="el equipo se desconectó de manera imprevista")
-            self.show_message_dialog("Error de recurso en el puerto serial. Desconectando...")
+            self.serial_handler.connected.connect(
+                self.update_connection_status)
+            self.play_audio(
+                string="el equipo se desconectó de manera imprevista")
+            self.show_message_dialog(
+                "Error de recurso en el puerto serial. Desconectando...")
         elif error_code == QSerialPort.NoError:
             self.show_message_dialog("Conectado Correctamente")
         else:
             # Acciones genéricas para otros tipos de errores
-            self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(error_code, self.serial_handler.get_serial_port().errorString()))
+            self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(
+                error_code, self.serial_handler.get_serial_port().errorString()))
 
     def play_audio(self, string):
         # Funcion para pasar texto a audio
@@ -281,10 +292,11 @@ class MainApp(QMainWindow):
             print(f"El archivo {file_path} no existe.")
 
     def read_ports(self):
-        self.portList = [p.portName() for p in QSerialPortInfo.availablePorts()]
+        self.portList = [p.portName()
+                         for p in QSerialPortInfo.availablePorts()]
         self.cb_list_ports.clear()
         self.cb_list_ports.addItems(self.portList)
-    
+
     def send_data(self, data):
         self.serial_handler.send_data(data)
 
@@ -295,7 +307,6 @@ class MainApp(QMainWindow):
         self.serial_handler.connect_serial(port_name, baud_rate)
         self.serial_handler.connected.connect(self.update_connection_status)
 
-    
     def update_connection_status(self, isConnect):
         self.is_connect = isConnect
         if self.is_connect:
@@ -304,13 +315,48 @@ class MainApp(QMainWindow):
         else:
             self.etiqueta_estado.setStyleSheet("color:#FF0000;")
             self.etiqueta_estado.setText("DESCONECTADO")
-        
+
     def serial_disconnect(self):
         # Funcion para desconectar el puerto serial
 
         # Envia la señal para que el hilo maneje la desconexión
         self.serial_handler.disconnect_serial()
         self.serial_handler.connected.connect(self.update_connection_status)
+
+    def obtener_coordenadas_velocidad_potencia(self, linea):
+        coordenadas = {'X': self.X, 'Y': self.Y, 'Z': self.Z}
+        velocidad = self.velocidad_actual
+        potencia = self.potencia_actual
+
+        # Eliminar comentarios
+        linea = linea.split(";")[0].strip()
+
+        # Asegurarse de que la línea sea un comando G-code válido
+        if linea:
+            partes = linea.split()
+
+            for parte in partes:
+                if parte[0] == 'G':
+                    # Comando G, verificar si es movimiento lineal (G0 o G1)
+                    if parte == 'G0' or parte == 'G1':
+                        for componente in partes[1:]:
+                            match = re.match(r"([XYZ])([+-]?\d+(\.\d+)?)", componente)
+                            if match:
+                                coordenada, valor = match.group(1), float(match.group(2))
+                                setattr(self, coordenada, valor)
+                                coordenadas[coordenada] = valor
+                elif parte.startswith('F'):
+                    # Velocidad (Feed Rate)
+                    velocidad = float(parte[1:])
+                elif parte[0] == 'S':
+                    # Potencia
+                    potencia = float(parte[1:])
+        
+        self.velocidad_actual = velocidad
+        self.potencia_actual = potencia
+        self.X, self.Y, self.Z = coordenadas['X'], coordenadas['Y'], coordenadas['Z']
+
+        return coordenadas, velocidad, potencia
 
     def stream_gcode(self, gcode_path):
         # Reads the G-code file
@@ -319,7 +365,6 @@ class MainApp(QMainWindow):
 
         # Executes each line of the G-code
         for line in gcode:
-            print("hola 1")
             print(line)
             # Removes comments and end-of-line characters
             line = self.remove_comment(self.remove_eol_chars(line))
@@ -328,17 +373,22 @@ class MainApp(QMainWindow):
             if line and line != "\n":
                 # Writes the G-code to the printer
                 self.send_data(line)
-                coordenadas, velocidad = self.obtener_coordenadas_y_velocidad(line)
-                print(coordenadas)
-                print("velocidad: ", velocidad)
+                coordenadas, velocidad, potencia = self.obtener_coordenadas_velocidad_potencia(line)
+                #cone_mesh.translate(self.X - self.X_prev, self.Y - self.Y_prev, self.Z - self.Z_prev)
+                #self.grafica_punto
+                self.x_coord.display(coordenadas['X'])
+                self.y_coord.display(coordenadas['Y'])
+                self.z_coord.display(coordenadas['Z'])
+                self.potencia.display(potencia)
+                self.velocidad.display(velocidad)
+                self.grafica_punto(potencia=potencia)
 
                 # Waits for the "OK" response from the printer
                 response = self.wait_for_ok_response()
-                print("adios")
 
                 # Do something with the response if needed
                 print(response)
-    
+
     def start_serial_reading(self):
         # Conectar la señal readyRead para manejar la llegada de nuevos datos
         self.serial_handler.get_serial_port().readyRead.connect(self.read_data_non_blocking)
@@ -346,71 +396,32 @@ class MainApp(QMainWindow):
     def read_data_non_blocking(self):
         # Manejar los datos disponibles de manera no bloqueante
         while self.serial_handler.get_serial_port().bytesAvailable() > 0:
-            self.serial_handler.data_received.connect(self.data_received_from_port)
+            self.serial_handler.data_received.connect(
+                self.data_received_from_port)
             response = self.port_line
             self.data_received_from_port(response)
-
 
     def wait_for_ok_response(self):
         response = ''
 
         while response.count("ok") == 0:
             # No uses waitForReadyRead aquí, ya que es bloqueante
-            self.serial_handler.read_data()  # Asegúrate de que esta función lea de manera no bloqueante
-            self.serial_handler.data_received.connect(self.data_received_from_port)
+            # Asegúrate de que esta función lea de manera no bloqueante
+            self.serial_handler.read_data()
+            self.serial_handler.data_received.connect(
+                self.data_received_from_port)
 
             # Si deseas esperar un poco antes de verificar nuevamente, puedes usar un temporizador
             # QCoreApplication.processEvents() permite que la interfaz siga respondiendo
             QCoreApplication.processEvents()
-            QThread.msleep(50)  # Puedes ajustar el tiempo de espera según tus necesidades
+            # Puedes ajustar el tiempo de espera según tus necesidades
+            QThread.msleep(50)
 
             response += self.port_line
             if "ok" in response:
                 break
 
         return response
-
-    # def wait_for_ok_response(self):
-    #     response = ''
-        
-    #     while response.count("ok") == 0:
-    #         # Waits for response
-    #         self.serial_handler.read_data()
-    #         while self.serial_handler.get_serial_port().waitForReadyRead(500):
-    #             response += self.port_line
-    #             if "ok" in response:
-    #                 break
-
-    #     return response
-    
-    # def stream_gcode(self, gcode_path):
-    #     #reads the gcode file
-    #     gcodeFile = open(gcode_path,'r')
-    #     gcode = gcodeFile.readlines()
-    #     #executes each line of the gcode
-    #     for line in gcode:
-    #         response = ''
-    #         #removes comments
-    #         line = self.remove_comment(self.remove_eol_chars(line))
-    #         #makes sure line is a valid command
-    #         if(line != "" and line != "\n"):
-    #             #writes the gcode to the printer
-    #             self.send_data(line)
-    #             coordenadas, velocidad = self.obtener_coordenadas_y_velocidad(line)
-    #             print(coordenadas)
-    #             print("velocidad: ", velocidad)
-    #             self.serial_handler.read_data()
-    #             self.serial_handler.data_received.connect(self.data_received_from_port)
-    #             response = self.port_line
-    #             #waits for OK response from printer
-    #             while response.count("ok") == 0:
-    #                 #waits for response
-    #                 self.serial_handler.read_data()
-    #                 self.serial_handler.data_received.connect(self.data_received_from_port)
-    #                 while self.serial_handler.get_serial_port().waitForReadyRead(200):
-    #                     response += self.port_line
-    #                 print(response)
-    #                 # self.serial.clear(QSerialPort.Input)
 
     def calculate_percentage(total_lines, processed_lines):
         if total_lines == 0:
@@ -420,7 +431,6 @@ class MainApp(QMainWindow):
     def limpiar(self):
         self.textEdit.setText("")
         self.textEdit.setReadOnly(False)
-
 
     def eventFilter(self, obj, event):
         if obj == self.blink and event.type() == QEvent.MouseButtonPress:
@@ -464,32 +474,57 @@ class MainApp(QMainWindow):
             self.textEdit.setText(self.datos)
         self.textEdit.setReadOnly(True)
 
-    def remove_comment(self, string:str):
+    def remove_comment(self, string: str):
         if (string.find(';') == -1):
             return string
         else:
             return string[:string.index(';')]
 
-    def remove_eol_chars(self, string:str):
+    def remove_eol_chars(self, string: str):
         # removed \n or traling spaces
         return string.strip()
 
-    def grafica_punto(self):
+    def grafica_punto(self, potencia = 0):
         # Actualizar el objeto GLLinePlotItem con los nuevos puntos
         try:
             self.path_points.append([-10 + self.X, -14 + self.Y, 0 + self.Z])
             if len(self.path_points) >= 2:
                 path_array = np.array(self.path_points)
                 self.path_item.setData(
-                    pos=path_array, color=(1, 0, 0, 1), width=2)
+                pos=path_array, color=(1, 0, 0, 1), width=2)
         except Exception as e:
             print(f"Error: {e}")
 
+    # def grafica_punto(self, potencia):
+    #     try:
+    #         # Actualizar las coordenadas y potencia
+    #         self.potencia_actual = potencia
+
+    #         # Añadir el nuevo punto a la lista
+    #         self.path_points.append({'pos': [self.X, self.Y, self.Z], 'potencia': self.potencia_actual})
+
+    #         if len(self.path_points) >= 2:
+    #             # Convertir la lista de puntos a un array de numpy para la visualización
+    #             path_array = np.array([p['pos'] for p in self.path_points])
+
+    #             # Definir colores para contornos y áreas no grabadas
+    #             color_contorno = (1, 0, 0, 1)  # Rojo para contornos
+    #             color_no_grabado = (0, 0, 0, 0)  # Transparente para áreas no grabadas
+
+    #             # Crear una lista de colores según la potencia
+    #             colores = [color_contorno if p['potencia'] > 300 else color_no_grabado for p in self.path_points]
+
+    #             # Actualizar el objeto GLLinePlotItem con los nuevos puntos y colores
+    #             self.path_item.setData(pos=path_array, color=colores, width=2)
+
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+
     def set_home(self):
-        if self.is_connect: 
+        if self.is_connect:
             self.send_data("G92 X0 Y0 Z0")
             self.home()
-        else: 
+        else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def avanza_y(self):
@@ -499,7 +534,7 @@ class MainApp(QMainWindow):
             self.send_data(f"G1 Y{self.Y} F{velocidad}")
             cone_mesh.translate(0, self.Y - prev_y, 0)
             self.grafica_punto()
-        else: 
+        else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def retrocede_y(self):
@@ -529,7 +564,7 @@ class MainApp(QMainWindow):
             self.send_data(f"G1 X{self.X} F{velocidad}")
             cone_mesh.translate(self.X - prev_x, 0, 0)
             self.grafica_punto()
-        else: 
+        else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
     def avanza_z(self):
@@ -559,7 +594,8 @@ class MainApp(QMainWindow):
             prev_z = self.Z
             self.X = self.Y = self.Z = 0.0
             self.send_data(f"G1 X0 Y0 Z0 F{velocidad}")
-            cone_mesh.translate(self.X - prev_x, self.Y - prev_y, self.Z - prev_z)
+            cone_mesh.translate(self.X - prev_x, self.Y -
+                                prev_y, self.Z - prev_z)
 
             # Reiniciar la lista de puntos del camino
             self.path_points = []
@@ -630,7 +666,7 @@ class MainApp(QMainWindow):
         self.progressBar.setValue(porcentaje)
 
     def comenzar(self):
-        if self.is_connect: 
+        if self.is_connect:
             self.boton_parar_presionado = False
             dato = self.textEdit.toPlainText()
 
@@ -638,39 +674,38 @@ class MainApp(QMainWindow):
                 archivo.write(dato)
 
             self.stream_gcode("codigo_g.txt")
-        else: 
+        else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
-    
+
     @pyqtSlot(str)
     def data_received_from_port(self, data):
         self.port_line = data
 
-    def obtener_coordenadas_y_velocidad(self,linea):
-        coordenadas = {'X': 0, 'Y': 0, 'Z': 0}
-        velocidad = None
+    # def obtener_coordenadas_y_velocidad(self,linea):
+    #     coordenadas = {'X': 0, 'Y': 0, 'Z': 0}
+    #     velocidad = None
 
-        # Eliminar comentarios
-        linea = linea.split(";")[0].strip()
+    #     # Eliminar comentarios
+    #     linea = linea.split(";")[0].strip()
 
-        # Asegurarse de que la línea sea un comando G-code válido
-        if linea:
-            partes = linea.split()
+    #     # Asegurarse de que la línea sea un comando G-code válido
+    #     if linea:
+    #         partes = linea.split()
 
-            for parte in partes:
-                if parte[0] == 'G':
-                    # Comando G, verificar si es movimiento lineal (G0 o G1)
-                    if parte == 'G0' or parte == 'G1':
-                        for componente in partes[1:]:
-                            if componente[0] in coordenadas:
-                                coordenada, valor = componente[0], float(componente[1:])
-                                coordenadas[coordenada] = valor
-                    elif parte[0] == 'F':
-                        # Velocidad (Feed Rate)
-                        velocidad = float(parte[1:])
+    #         for parte in partes:
+    #             if parte[0] == 'G':
+    #                 # Comando G, verificar si es movimiento lineal (G0 o G1)
+    #                 if parte == 'G0' or parte == 'G1':
+    #                     for componente in partes[1:]:
+    #                         if componente[0] in coordenadas:
+    #                             coordenada, valor = componente[0], float(componente[1:])
+    #                             coordenadas[coordenada] = valor
+    #                 elif parte[0] == 'F':
+    #                     # Velocidad (Feed Rate)
+    #                     velocidad = float(parte[1:])
 
-        return coordenadas, velocidad
+    #     return coordenadas, velocidad
 
-    
     def parar(self):
         if self.is_connect:
             self.boton_parar_presionado = True
@@ -693,7 +728,6 @@ class MainApp(QMainWindow):
         prev_x = self.X
         prev_y = self.Y
         prev_z = self.Z
-
 
 
 if __name__ == "__main__":

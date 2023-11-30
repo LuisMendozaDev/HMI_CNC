@@ -1100,7 +1100,7 @@ color: #FFF;</string>
                 </widget>
                </item>
                <item>
-                <widget class="QLCDNumber" name="lcdNumber">
+                <widget class="QLCDNumber" name="velocidad">
                  <property name="minimumSize">
                   <size>
                    <width>75</width>

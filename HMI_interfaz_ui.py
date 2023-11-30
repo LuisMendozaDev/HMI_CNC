@@ -496,13 +496,13 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_10.addWidget(self.label_5)
 
-        self.lcdNumber = QLCDNumber(self.frame_10)
-        self.lcdNumber.setObjectName(u"lcdNumber")
-        self.lcdNumber.setMinimumSize(QSize(75, 50))
-        self.lcdNumber.setMaximumSize(QSize(16777215, 50))
-        self.lcdNumber.setStyleSheet(u"background-color: rgb(255, 255, 255);")
+        self.velocidad = QLCDNumber(self.frame_10)
+        self.velocidad.setObjectName(u"velocidad")
+        self.velocidad.setMinimumSize(QSize(75, 50))
+        self.velocidad.setMaximumSize(QSize(16777215, 50))
+        self.velocidad.setStyleSheet(u"background-color: rgb(255, 255, 255);")
 
-        self.verticalLayout_10.addWidget(self.lcdNumber)
+        self.verticalLayout_10.addWidget(self.velocidad)
 
 
         self.horizontalLayout_8.addWidget(self.frame_10)
