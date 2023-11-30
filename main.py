@@ -118,6 +118,10 @@ class MainApp(QMainWindow):
         global prev_x
         global prev_y
         global prev_Z
+        
+        self.imprimir_linea_actual=0
+        self.numero_linea_actual=0
+        self.numero_total_lineas=0
 
         self.serial_handler = SerialHandler()
         self.serial_thread = QThread()
@@ -362,6 +366,8 @@ class MainApp(QMainWindow):
         # Reads the G-code file
         with open(gcode_path, 'r') as gcodeFile:
             gcode = gcodeFile.readlines()
+            
+        self.numero_total_lineas=len(gcode)
 
         # Executes each line of the G-code
         for line in gcode:
@@ -420,7 +426,11 @@ class MainApp(QMainWindow):
             response += self.port_line
             if "ok" in response:
                 break
-
+        self.numero_linea_actual+=1
+        self.numero_total_lineas
+        self.imprimir_linea_actual=((self.numero_linea_actual/self.numero_total_lineas)*100)
+        self.progressBar.setValue(self.imprimir_linea_actual)
+        
         return response
 
     def calculate_percentage(total_lines, processed_lines):
@@ -431,6 +441,7 @@ class MainApp(QMainWindow):
     def limpiar(self):
         self.textEdit.setText("")
         self.textEdit.setReadOnly(False)
+        self.limpiar_progreso()
 
     def eventFilter(self, obj, event):
         if obj == self.blink and event.type() == QEvent.MouseButtonPress:
@@ -664,9 +675,16 @@ class MainApp(QMainWindow):
 
     def progreso(self, porcentaje):
         self.progressBar.setValue(porcentaje)
+        
+    def limpiar_progreso(self):
+        self.numero_linea_actual=0
+        self.numero_total_lineas=0
+        self.imprimir_linea_actual=0
+        self.progressBar.setValue(self.imprimir_linea_actual)
 
     def comenzar(self):
         if self.is_connect:
+            self.limpiar_progreso()
             self.boton_parar_presionado = False
             dato = self.textEdit.toPlainText()
 
