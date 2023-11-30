@@ -36,8 +36,10 @@ class PlayAudio(QObject):
         # Funcion para pasar texto a audio
         tts = gTTS(text=string, lang='es')
         # Guarda el audio como un archivo temporal
-        tts.save("tmp/temp.mp3")
-        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+        tts.save("tmp/temp.mp3")      
+        file_path=os.path.abspath("tmp/temp.mp3")
+        print(file_path)
+        
         if os.path.exists(file_path):
             audio = AudioSegment.from_file(file_path)
             play(audio)
@@ -118,16 +120,20 @@ class MainApp(QMainWindow):
         global prev_x
         global prev_y
         global prev_Z
+        
+        self.imprimir_linea_actual=0
+        self.numero_linea_actual=0
+        self.numero_total_lineas=0
 
         self.serial_handler = SerialHandler()
         self.serial_thread = QThread()
         self.serial_handler.moveToThread(self.serial_thread)
         self.serial_thread.start()
 
-        # self.audio_player = PlayAudio()
-        # self.serial_thread_2 = QThread(self)
-        # self..moveToThread(self.serial_thread_2)
-        # self.serial_thread.start()
+        self.audio_player = PlayAudio()
+        self.audio_player_thread = QThread(self)
+        self.moveToThread(self.audio_player_thread)
+        self.serial_thread.start()
 
         # Conecta la señal error_occurred a una función específica
         self.serial_handler.error_occurred.connect(self.handle_serial_error)
@@ -268,7 +274,7 @@ class MainApp(QMainWindow):
             # Acciones específicas para manejar ResourceError
             self.serial_handler.connected.connect(
                 self.update_connection_status)
-            self.play_audio(
+            self.audio_player.play_audio(
                 string="el equipo se desconectó de manera imprevista")
             self.show_message_dialog(
                 "Error de recurso en el puerto serial. Desconectando...")
@@ -279,17 +285,17 @@ class MainApp(QMainWindow):
             self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(
                 error_code, self.serial_handler.get_serial_port().errorString()))
 
-    def play_audio(self, string):
-        # Funcion para pasar texto a audio
-        tts = gTTS(text=string, lang='es')
-        # Guarda el audio como un archivo temporal
-        tts.save("tmp/temp.mp3")
-        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
-        if os.path.exists(file_path):
-            audio = AudioSegment.from_file(file_path)
-            play(audio)
-        else:
-            print(f"El archivo {file_path} no existe.")
+    # def play_audio(self, string):
+    #     # Funcion para pasar texto a audio
+    #     tts = gTTS(text=string, lang='es')
+    #     # Guarda el audio como un archivo temporal
+    #     tts.save("tmp/temp.mp3")
+    #     file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+    #     if os.path.exists(file_path):
+    #         audio = AudioSegment.from_file(file_path)
+    #         play(audio)
+    #     else:
+    #         print(f"El archivo {file_path} no existe.")
 
     def read_ports(self):
         self.portList = [p.portName()
@@ -397,6 +403,8 @@ class MainApp(QMainWindow):
         # Reads the G-code file
         with open(gcode_path, 'r') as gcodeFile:
             gcode = gcodeFile.readlines()
+            
+        self.numero_total_lineas=len(gcode)
 
         # Executes each line of the G-code
         for line in gcode:
@@ -455,7 +463,11 @@ class MainApp(QMainWindow):
             response += self.port_line
             if "ok" in response:
                 break
-
+        self.numero_linea_actual+=1
+        self.numero_total_lineas
+        self.imprimir_linea_actual=((self.numero_linea_actual/self.numero_total_lineas)*100)
+        self.progressBar.setValue(self.imprimir_linea_actual)
+        
         return response
 
     def calculate_percentage(total_lines, processed_lines):
@@ -466,6 +478,7 @@ class MainApp(QMainWindow):
     def limpiar(self):
         self.textEdit.setText("")
         self.textEdit.setReadOnly(False)
+        self.limpiar_progreso()
 
     def eventFilter(self, obj, event):
         if obj == self.blink and event.type() == QEvent.MouseButtonPress:
@@ -663,9 +676,16 @@ class MainApp(QMainWindow):
 
     def progreso(self, porcentaje):
         self.progressBar.setValue(porcentaje)
+        
+    def limpiar_progreso(self):
+        self.numero_linea_actual=0
+        self.numero_total_lineas=0
+        self.imprimir_linea_actual=0
+        self.progressBar.setValue(self.imprimir_linea_actual)
 
     def comenzar(self):
         if self.is_connect:
+            self.limpiar_progreso()
             self.boton_parar_presionado = False
             dato = self.textEdit.toPlainText()
 
