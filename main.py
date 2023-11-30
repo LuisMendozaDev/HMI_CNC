@@ -36,8 +36,10 @@ class PlayAudio(QObject):
         # Funcion para pasar texto a audio
         tts = gTTS(text=string, lang='es')
         # Guarda el audio como un archivo temporal
-        tts.save("tmp/temp.mp3")
-        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+        tts.save("tmp/temp.mp3")      
+        file_path=os.path.abspath("tmp/temp.mp3")
+        print(file_path)
+        
         if os.path.exists(file_path):
             audio = AudioSegment.from_file(file_path)
             play(audio)
@@ -128,10 +130,10 @@ class MainApp(QMainWindow):
         self.serial_handler.moveToThread(self.serial_thread)
         self.serial_thread.start()
 
-        # self.audio_player = PlayAudio()
-        # self.serial_thread_2 = QThread(self)
-        # self..moveToThread(self.serial_thread_2)
-        # self.serial_thread.start()
+        self.audio_player = PlayAudio()
+        self.audio_player_thread = QThread(self)
+        self.moveToThread(self.audio_player_thread)
+        self.serial_thread.start()
 
         # Conecta la señal error_occurred a una función específica
         self.serial_handler.error_occurred.connect(self.handle_serial_error)
@@ -272,7 +274,7 @@ class MainApp(QMainWindow):
             # Acciones específicas para manejar ResourceError
             self.serial_handler.connected.connect(
                 self.update_connection_status)
-            self.play_audio(
+            self.audio_player.play_audio(
                 string="el equipo se desconectó de manera imprevista")
             self.show_message_dialog(
                 "Error de recurso en el puerto serial. Desconectando...")
@@ -283,17 +285,17 @@ class MainApp(QMainWindow):
             self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(
                 error_code, self.serial_handler.get_serial_port().errorString()))
 
-    def play_audio(self, string):
-        # Funcion para pasar texto a audio
-        tts = gTTS(text=string, lang='es')
-        # Guarda el audio como un archivo temporal
-        tts.save("tmp/temp.mp3")
-        file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
-        if os.path.exists(file_path):
-            audio = AudioSegment.from_file(file_path)
-            play(audio)
-        else:
-            print(f"El archivo {file_path} no existe.")
+    # def play_audio(self, string):
+    #     # Funcion para pasar texto a audio
+    #     tts = gTTS(text=string, lang='es')
+    #     # Guarda el audio como un archivo temporal
+    #     tts.save("tmp/temp.mp3")
+    #     file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
+    #     if os.path.exists(file_path):
+    #         audio = AudioSegment.from_file(file_path)
+    #         play(audio)
+    #     else:
+    #         print(f"El archivo {file_path} no existe.")
 
     def read_ports(self):
         self.portList = [p.portName()
