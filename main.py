@@ -28,7 +28,6 @@ import os
 
 
 class PlayAudio(QObject):
-
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -45,6 +44,15 @@ class PlayAudio(QObject):
             play(audio)
         else:
             print(f"El archivo {file_path} no existe.")
+
+    def reproduce(self, file_path):
+        if os.path.exists(file_path):
+            audio = AudioSegment.from_file(file_path)
+            play(audio)
+        else:
+            print(f"El archivo {file_path} no existe.")
+        # Reproducir el audio
+        play(audio)
 
 
 class SerialHandler(QObject):
@@ -117,9 +125,8 @@ class MainApp(QMainWindow):
         global milisegundos
         global cone_mesh
         global cone
-        global prev_x
-        global prev_y
-        global prev_Z
+        global width
+        global height
         
         self.imprimir_linea_actual=0
         self.numero_linea_actual=0
@@ -131,18 +138,31 @@ class MainApp(QMainWindow):
         self.serial_thread.start()
 
         self.audio_player = PlayAudio()
-        self.audio_player_thread = QThread(self)
-        self.moveToThread(self.audio_player_thread)
-        self.serial_thread.start()
+        self.audio_player_thread = QThread()
+        self.audio_player.moveToThread(self.audio_player_thread)
+        self.audio_player_thread.start()
+
+        self.listening = False
+
+        # Se inicializa las variables para reconocer voz y activar microfono
+        self.recognizer = sr.Recognizer()
+        self.microphone = None
+
+        # Dado que se precione la tecla espaciadora se ejecuta la funcion toggle_listening()
+        keyboard.add_hotkey('j', lambda: self.toggle_listening())
 
         # Conecta la señal error_occurred a una función específica
         self.serial_handler.error_occurred.connect(self.handle_serial_error)
+        self.audio_player
 
         self.is_connect = False
         self.archivo = []
         self.gcode = ""
         milisegundos = 200
+        width = 17
+        height = 27
         self.resolucion = 0.5
+        self.slider_pasos.valueChanged.connect(self.pasos)
         distancia = 40
         comandos_g = "codigo_g.txt"
         # Variable para controlar la pausa/detención del proceso
@@ -153,18 +173,17 @@ class MainApp(QMainWindow):
         self.port_line = ""
 
         self.portList = []
-        # self.serial = QSerialPort()
-        # self.serial.errorOccurred.connect(self.handle_error)
+
         self.line_port = ""
 
-        self.setWindowTitle("Gráfica 3D con PyQt5 y Matplotlib")
+        self.setWindowTitle("interfaz CNC modular")
 
         # Se vinculan los botones de actualizar, conectar y desconectar con las respectivas funciones
         self.bt_actualizar.clicked.connect(self.read_ports)
         self.bt_conectar.clicked.connect(self.serial_connect)
         self.bt_desconectar.clicked.connect(self.serial_disconnect)
 
-        # Se vinculan los botones de avance de cada eje con sus respectivas funciones
+        # Se vinculan los botones de avance de cada eje con sus respectivas 
         self.bt_y_avanza.clicked.connect(self.avanza_y)
         self.bt_y_retrocede.clicked.connect(self.retrocede_y)
         self.bt_x_avanza.clicked.connect(self.avanza_x)
@@ -173,15 +192,17 @@ class MainApp(QMainWindow):
         self.bt_z_retrocede.clicked.connect(self.retrocede_z)
         # handler para manejar hilo
         self.serial_handler.connected.connect(self.update_connection_status)
-        # self.serial_handler.disconnected.connect(self.update_connection_status)
         # Boton set home
         self.setHome.clicked.connect(self.set_home)
+        self.setHome.setToolTip("Establecer casa")
 
         # Se vincula accion para agregar archivo GCODE
         self.mni_subir_gcode.triggered.connect(self.subir_archivo)
         #  Se vinculan los botones de start y stop
         self.start.clicked.connect(self.comenzar)
+        self.start.setToolTip("Comenzar proceso")
         self.stop.clicked.connect(self.parar)
+        self.stop.setToolTip("Parada de emergencia")
         # boton para limpiar consola
         self.limpiar_consola.clicked.connect(self.limpiar)
 
@@ -200,7 +221,7 @@ class MainApp(QMainWindow):
         self.view3D.setBackgroundColor(QColor(0, 0, 0))
         self.grid0 = gl.GLGridItem()
         self.grid0.setColor(QColor(255, 255, 255))
-        self.grid0.setSize(20, 28, 1)
+        self.grid0.setSize(width, height, 1)
         self.view3D.addItem(self.grid0)
 
         self.X = 0
@@ -215,17 +236,17 @@ class MainApp(QMainWindow):
         axis_width = 5  # Puedes ajustar este valor según tu preferencia
 
         # Eje X (rojo)
-        x_axis_points = np.array([[-10, 14, 0], [-9, 14, 0]])
+        x_axis_points = np.array([[-width/2, height/2, 0], [-4.5, height/2, 0]])
         x_axis = GLLinePlotItem(
             pos=x_axis_points, color=(1, 0, 0, 1), width=axis_width)
 
         # Eje Y (verde)
-        y_axis_points = np.array([[-10, 14, 0], [-10, 13, 0]])
+        y_axis_points = np.array([[-width/2, height/2, 0], [-width/2, 6.5, 0]])
         y_axis = GLLinePlotItem(
             pos=y_axis_points, color=(0, 1, 0, 1), width=axis_width)
 
         # Eje Z (azul)
-        z_axis_points = np.array([[-10, 14, 0], [-10, 14, 1]])
+        z_axis_points = np.array([[-width/2, height/2, 0], [-width/2, height/2, 1]])
         z_axis = GLLinePlotItem(
             pos=z_axis_points, color=(0, 0, 1, 1), width=axis_width)
 
@@ -236,23 +257,28 @@ class MainApp(QMainWindow):
         self.plotWidget.addWidget(self.view3D)
 
         self.iso_button.clicked.connect(self.set_isometric_view)
+        self.iso_button.setToolTip("Vista isometrica")
 
         # Botones para vistas desde los lados
-        self.front_button.clicked.connect(self.set_front_view)
+        self.front_button.clicked.connect(self.set_front_view) 
+        self.front_button.setToolTip("Vista frontal")
 
         self.side_button.clicked.connect(self.set_side_view)
+        self.side_button.setToolTip("Vista lateral")
 
         self.top_button.clicked.connect(self.set_top_view)
+        self.top_button.setToolTip("Vista superior")
 
         # Conecta las señales del botón
         self.blink.installEventFilter(self)
+        self.blink.setToolTip("Blink")
 
         # Crear un cono de ejemplo
         cone = gl.MeshData.cylinder(
             rows=10, cols=20, radius=[0.0, 0.5], length=2.0)
         cone_mesh = gl.GLMeshItem(meshdata=cone, color=(1.0, 0.0, 0.0, 1.0))
         # Posición del cono en coordenadas (x, y, z)
-        cone_mesh.translate(-10+self.X, -14+self.Y, 0+self.Z)
+        cone_mesh.translate(-width/2+self.X, -height/2+self.Y, 0+self.Z)
 
         # Agregar el cono a la vista 3D
         self.view3D.addItem(cone_mesh)
@@ -261,41 +287,103 @@ class MainApp(QMainWindow):
         self.path_points = []
 
         # Crear un objeto GLLinePlotItem para el camino
-        self.path_item = gl.GLLinePlotItem()
+        # self.path_item = gl.GLLinePlotItem()
 
+        self.path_item = gl.GLScatterPlotItem()
         # Agregar el objeto GLLinePlotItem a la vista 3D
         self.view3D.addItem(self.path_item)
 
-        self.progreso(0)
+        self.progressBar.setValue(0)
+    
+    def pasos(self, valor):
+        self.resolucion = valor/10
+        self.n_pasos.setText("Paso: " + str(self.resolucion))
 
+
+    def toggle_listening(self):
+        # funcion que se encarga de activar o desactivar el micro
+        if self.listening:
+            self.stop_listening()
+        else:
+            self.start_listening()
+
+    def start_listening(self):
+        # Funcion para activar el micro
+        if not self.listening:
+            self.microphone = sr.Microphone()
+            self.listening = True
+            with self.microphone as source:
+                self.audio_player.play_audio("Escuchando")
+                print('Escuchando...')
+                audio = self.recognizer.listen(source, phrase_time_limit=5)
+                self.print_transcription(audio)
+                self.listening = False
+
+    def stop_listening(self):
+        # Funcion para desactivar el micro
+        if self.listening and self.microphone is not None:
+            self.listening = False
+            self.microphone.__exit__(None, None, None)  # Cerrar el micrófono
+            self.microphone = None  # Restablecer el micrófono a None
+
+    def print_transcription(self, audio):
+        # Funcion donde se ejecuta el reconocimiento de voz 
+        try:
+            n_puertos = len(self.portList)
+            text = self.recognizer.recognize_google(audio, language='es-ES')
+            print('Texto Escuchado: ' + text)
+            if (("dame" in text or "Dame" in text or "dime" in text) and ("lista" in text or "listado" in text) and ("puerto" in text or "puertos" in text)):
+                puerto = ""
+                # Da el listado de puertos disponibles
+                if (n_puertos != 0):
+                    for i in range(n_puertos):
+                        puerto = puerto + str(self.portList[i]) + ", "
+                        print(puerto)
+                    self.audio_player.play_audio("el listado de puerto es: " + puerto)
+                else:
+                    self.audio_player.play_audio("No hay puertos disponibles")
+            elif ("conectar" in text and not ("des" in text) or "conectarse" in text):
+                    # Conecta el puerto serial
+                    self.serial_connect()
+            elif ("desconectar" in text or "desconectarse" in text):
+                    # Conecta el puerto serial
+                    self.serial_disconnect()
+            elif ("ir" in text and "casa" in text):
+                self.audio_player.play_audio(string="Yendo a casa")
+                self.home()
+                self.audio_player.reproduce("audio_done.mp3")
+            elif (("setear" in text or "establecer" in text) and ("casa" in text or "home" in text)):
+                self.audio_player.play_audio(string="Seteando casa")
+                self.set_home()
+                self.audio_player.reproduce("audio_done.mp3")
+            elif(("comenzar" in text or "empezar" in text) and "proceso" in text):
+                self.comenzar()
+            elif (("parar" in text or "detener" in text) and "emergencia" in text):
+                self.parar()
+            else:
+                print('Comando no reconocido.')
+                self.audio_player.play_audio("Comando no reconocido.")
+        except Exception as e:  
+            print(e)
+    
     @pyqtSlot(int)
     def handle_serial_error(self, error_code):
         if error_code == QSerialPort.ResourceError:
             # Acciones específicas para manejar ResourceError
-            self.serial_handler.connected.connect(
-                self.update_connection_status)
-            self.audio_player.play_audio(
-                string="el equipo se desconectó de manera imprevista")
-            self.show_message_dialog(
-                "Error de recurso en el puerto serial. Desconectando...")
+            self.serial_handler.connected.connect(self.update_connection_status)
+            self.serial_handler.connected.disconnect(self.update_connection_status)
+            self.audio_player.reproduce("alarm.mp3")
+            self.audio_player.play_audio("el equipo se desconectó de manera imprevista")
+            self.show_message_dialog("Error de recurso en el puerto serial. Desconectando...")
+            
+
         elif error_code == QSerialPort.NoError:
             self.show_message_dialog("Conectado Correctamente")
         else:
             # Acciones genéricas para otros tipos de errores
             self.show_message_dialog("Error en el puerto serial (Código {}): {}".format(
                 error_code, self.serial_handler.get_serial_port().errorString()))
-
-    # def play_audio(self, string):
-    #     # Funcion para pasar texto a audio
-    #     tts = gTTS(text=string, lang='es')
-    #     # Guarda el audio como un archivo temporal
-    #     tts.save("tmp/temp.mp3")
-    #     file_path = 'C:\\Users\\Luis Fernando\\OneDrive\\Cloud Desk\\HMC_CNC_V1\\tmp\\temp.mp3'
-    #     if os.path.exists(file_path):
-    #         audio = AudioSegment.from_file(file_path)
-    #         play(audio)
-    #     else:
-    #         print(f"El archivo {file_path} no existe.")
+        
 
     def read_ports(self):
         self.portList = [p.portName()
@@ -312,15 +400,24 @@ class MainApp(QMainWindow):
         # Envia la señal para que el hilo maneje la conexión
         self.serial_handler.connect_serial(port_name, baud_rate)
         self.serial_handler.connected.connect(self.update_connection_status)
+        
 
     def update_connection_status(self, isConnect):
         self.is_connect = isConnect
+        print(self.is_connect)
         if self.is_connect:
+            self.bt_actualizar.setEnabled(False)
+            self.bt_conectar.setEnabled(False)
             self.etiqueta_estado.setStyleSheet("color:#00FF00;")
             self.etiqueta_estado.setText("CONECTADO")
+            self.audio_player.play_audio(string="Se conectó correctamente")
         else:
+            self.bt_actualizar.setEnabled(True)
+            self.bt_conectar.setEnabled(True)
             self.etiqueta_estado.setStyleSheet("color:#FF0000;")
             self.etiqueta_estado.setText("DESCONECTADO")
+            self.audio_player.play_audio(string="Se desconectó correctamente")
+        self.serial_handler.connected.disconnect(self.update_connection_status)
 
     def serial_disconnect(self):
         # Funcion para desconectar el puerto serial
@@ -328,6 +425,7 @@ class MainApp(QMainWindow):
         # Envia la señal para que el hilo maneje la desconexión
         self.serial_handler.disconnect_serial()
         self.serial_handler.connected.connect(self.update_connection_status)
+        print("holaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
     def obtener_coordenadas_velocidad_potencia(self, linea):
         coordenadas = {'X': self.X, 'Y': self.Y, 'Z': self.Z}
@@ -375,26 +473,39 @@ class MainApp(QMainWindow):
     #     except Exception as e:
     #         print(f"Error: {e}")
 
+    # def grafica_punto(self, potencia=0):
+    #     try:
+    #         # Solo agregar puntos y graficar si la potencia está dentro de un rango adecuado
+    #         if 100 <= self.potencia_actual <= 1000:
+    #             # Obtener el punto actual
+    #             current_point = np.array([[-width/2 + self.X, -height/2 + self.Y, 0 + self.Z]])
+
+    #             # Agregar el punto actual a la lista de todos los puntos
+    #             self.path_points.append(current_point)
+
+    #             # Configurar la apariencia de todos los puntos
+    #             all_points_array = np.concatenate(self.path_points)
+    #             self.path_item.setData(pos=all_points_array, color=(1, 0, 0, 1), size=4)
+
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+
     def grafica_punto(self, potencia=0):
         try:
-            # Crear una nueva lista para los puntos actuales
-            current_path = [[-10 + self.X, -14 + self.Y, 0 + self.Z]]
+            # Solo agregar puntos y graficar si la potencia está dentro de un rango adecuado
+            if 100 <= potencia <= 1000:
+                # Obtener el punto actual
+                current_point = np.array([[-width/2 + self.X, -height/2 + self.Y, 0 + self.Z]])
 
-            # Agregar el nuevo punto a la lista actual
-            if self.path_points:
-                current_path = self.path_points[-1] + current_path
+                # Agregar el punto actual a la lista de todos los puntos
+                self.path_points.append(current_point)
 
-            # Agregar la lista actual a la lista total de puntos
-            self.path_points.append(current_path)
+                # Configurar la apariencia de todos los puntos
+                all_points_array = np.concatenate(self.path_points)
+                self.path_item.setData(pos=all_points_array, color=(1, 0, 0, 1), size=4)
 
-            if len(self.path_points) >= 2:
-                path_array = np.array(self.path_points[-2])  # Tomar solo los puntos del conjunto anterior
-
-                # Ajustar la opacidad solo para los puntos más recientes con potencias más altas
-                alpha_values = np.linspace(0, 1, len(path_array)) * (1 - potencia)
-
-                # Configurar la apariencia de la línea con opacidad variable
-                self.path_item.setData(pos=path_array, color=(1, 0, 0, alpha_values), width=2)
+            # Actualizar potencia actual
+            self.potencia_actual = potencia
 
         except Exception as e:
             print(f"Error: {e}")
@@ -431,6 +542,8 @@ class MainApp(QMainWindow):
 
                 # Do something with the response if needed
                 print(response)
+                if self.detener_proceso or not(self.is_connect):
+                    break
 
     def start_serial_reading(self):
         # Conectar la señal readyRead para manejar la llegada de nuevos datos
@@ -458,7 +571,7 @@ class MainApp(QMainWindow):
             # QCoreApplication.processEvents() permite que la interfaz siga respondiendo
             QCoreApplication.processEvents()
             # Puedes ajustar el tiempo de espera según tus necesidades
-            QThread.msleep(50)
+            QThread.msleep(180)
 
             response += self.port_line
             if "ok" in response:
@@ -466,7 +579,7 @@ class MainApp(QMainWindow):
         self.numero_linea_actual+=1
         self.numero_total_lineas
         self.imprimir_linea_actual=((self.numero_linea_actual/self.numero_total_lineas)*100)
-        self.progressBar.setValue(self.imprimir_linea_actual)
+        self.progressBar.setValue(int(self.imprimir_linea_actual))
         
         return response
 
@@ -514,7 +627,7 @@ class MainApp(QMainWindow):
 
     def subir_archivo(self):
         self.archivo = QFileDialog.getOpenFileName(
-            self, 'Subir GCODE', 'C:\\', 'Archivo GCODE (*.gcode)')
+            self, 'Subir GCODE', 'C:\\', 'Archivo GCODE (*.gcode);;Archivos NC (*.nc);;Archivos TXT (*.txt)')
         # Abre el archivo .gcode
         with open(self.archivo[0], 'r') as gcode_file:
             print(self.archivo[0])
@@ -620,62 +733,6 @@ class MainApp(QMainWindow):
                 print(f"Error: {e}")
         else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
-
-    def calcular_progreso_gcode(self, archivo_gcode):
-        # Inicializa las variables para el seguimiento de coordenadas y progreso.
-        longitud_total = 0
-        distancia_actual = 0
-        coordenadas_actuales = {'X': 0, 'Y': 0, 'Z': 0}
-        print(coordenadas_actuales)
-        # Expresiones regulares para buscar comandos G, X, Y y Z en el archivo G-code.
-        patron_g = re.compile(r'G\d+(\.\d+)?')
-        patron_x = re.compile(r'X[+-]?\d+(\.\d+)?')
-        patron_y = re.compile(r'Y[+-]?\d+(\.\d+)?')
-        patron_z = re.compile(r'Z[+-]?\d+(\.\d+)?')
-
-        with open(archivo_gcode, 'r') as f:
-            for linea in f:
-                # Busca comandos G, X, Y y Z en la línea.
-                comando_g = patron_g.search(linea)
-                comando_x = patron_x.search(linea)
-                comando_y = patron_y.search(linea)
-                comando_z = patron_z.search(linea)
-
-                if comando_g:
-                    # Procesa el comando G encontrado.
-                    codigo_g = comando_g.group()
-                    # Aquí puedes realizar acciones específicas según el comando G encontrado si es necesario.
-
-                if comando_x:
-                    # Procesa el comando X encontrado.
-                    valor_x = float(comando_x.group()[1:])
-                    distancia_actual += abs(
-                        coordenadas_actuales['X'] - valor_x)
-                    coordenadas_actuales['X'] = valor_x
-
-                if comando_y:
-                    # Procesa el comando Y encontrado.
-                    valor_y = float(comando_y.group()[1:])
-                    distancia_actual += abs(
-                        coordenadas_actuales['Y'] - valor_y)
-                    coordenadas_actuales['Y'] = valor_y
-
-                if comando_z:
-                    # Procesa el comando Z encontrado.
-                    valor_z = float(comando_z.group()[1:])
-                    # Actualiza la coordenada Z si es necesario.
-
-        # Devuelve el progreso en porcentaje.
-        if longitud_total > 0:
-            progreso = (distancia_actual / longitud_total) * 100
-        else:
-            # Si no se puede determinar la longitud total, se asume que el progreso es del 100%.
-            progreso = 100
-
-        return progreso
-
-    def progreso(self, porcentaje):
-        self.progressBar.setValue(porcentaje)
         
     def limpiar_progreso(self):
         self.numero_linea_actual=0
@@ -684,6 +741,7 @@ class MainApp(QMainWindow):
         self.progressBar.setValue(self.imprimir_linea_actual)
 
     def comenzar(self):
+        self.audio_player.play_audio(string="Iniciar proceso. 3..., 2..., 1")
         if self.is_connect:
             self.limpiar_progreso()
             self.boton_parar_presionado = False
@@ -691,8 +749,11 @@ class MainApp(QMainWindow):
 
             with open(comandos_g, "w") as archivo:
                 archivo.write(dato)
-
+            
+            self.limpiar_consola.setEnabled(False)
             self.stream_gcode("codigo_g.txt")
+            self.limpiar_consola.setEnabled(True)
+            self.audio_player.reproduce("audio_done.mp3")
         else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
@@ -706,6 +767,7 @@ class MainApp(QMainWindow):
             if (self.boton_parar_presionado and not (self.detener_proceso)):
                 self.detener_proceso = True
                 self.send_data("M2")
+                self.audio_player.play_audio(string="Se detuvo el proceso")
         else:
             self.show_message_dialog("El Puerto Serial No Está Conectado")
 
@@ -717,12 +779,6 @@ class MainApp(QMainWindow):
         message_box.setIcon(QMessageBox.Information)
         message_box.setStandardButtons(QMessageBox.Ok)
         message_box.exec_()
-
-    def obtener_coordenada(self):
-        prev_x = self.X
-        prev_y = self.Y
-        prev_z = self.Z
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
